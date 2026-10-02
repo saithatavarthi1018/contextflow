@@ -4,18 +4,24 @@ from supabase import create_client
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from openai import OpenAI
 
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 DEFAULT_WORKSPACE_ID = os.getenv("DEFAULT_WORKSPACE_ID")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+groq_client = OpenAI(
+    api_key=GROQ_API_KEY,
+    base_url="https://api.groq.com/openai/v1",
+)
+
 app = FastAPI()
 
-# Allow the Next.js frontend (localhost:3000) to call this backend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
@@ -74,12 +80,21 @@ def send_message(context_id: str, payload: SendMessage):
         "content": payload.content,
     }).execute()
 
-    # Fake AI reply for now — real LLM comes in the next step
-    fake_reply = f"(fake reply) You said: {payload.content}"
+    # Load ONLY this context's history — this is the core isolation logic
+    history = supabase.table("messages").select("*").eq("context_id", context_id).order("created_at").execute().data
+
+    llm_messages = [{"role": m["role"], "content": m["content"]} for m in history]
+
+    response = groq_client.chat.completions.create(
+        model="openai/gpt-oss-20b",
+        messages=llm_messages,
+    )
+    reply_text = response.choices[0].message.content
+
     result = supabase.table("messages").insert({
         "context_id": context_id,
         "role": "assistant",
-        "content": fake_reply,
+        "content": reply_text,
     }).execute()
 
     return result.data[0]
