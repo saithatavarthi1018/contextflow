@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type ChatContext = {
   id: string;
@@ -10,46 +10,72 @@ type ChatContext = {
 
 type Message = {
   id: string;
-  contextId: string;
+  context_id: string;
   role: "user" | "assistant";
   content: string;
 };
 
 const COLORS = ["#22c55e", "#ef4444", "#3b82f6", "#eab308", "#a855f7", "#ec4899"];
+const API = "http://localhost:8000";
 
 export default function Home() {
-  const [contexts, setContexts] = useState<ChatContext[]>([
-    { id: "c1", name: "General", color: COLORS[0] },
-  ]);
-  const [activeContextId, setActiveContextId] = useState("c1");
+  const [contexts, setContexts] = useState<ChatContext[]>([]);
+  const [activeContextId, setActiveContextId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
 
-  function addContext() {
+  // Load contexts once on page load
+  useEffect(() => {
+    fetch(`${API}/contexts`)
+      .then((r) => r.json())
+      .then((data: ChatContext[]) => {
+        setContexts(data);
+        if (data.length > 0) setActiveContextId(data[0].id);
+      });
+  }, []);
+
+  // Load messages for ALL contexts, so the unified timeline can show everything
+  useEffect(() => {
+    if (contexts.length === 0) return;
+    Promise.all(
+      contexts.map((c) =>
+        fetch(`${API}/contexts/${c.id}/messages`).then((r) => r.json())
+      )
+    ).then((results) => {
+      setMessages(results.flat());
+    });
+  }, [contexts]);
+
+  async function addContext() {
     const name = prompt("Name this context:");
     if (!name) return;
     const color = COLORS[contexts.length % COLORS.length];
-    const id = "c" + (contexts.length + 1) + "-" + Date.now();
-    setContexts([...contexts, { id, name, color }]);
-    setActiveContextId(id);
+    const res = await fetch(`${API}/contexts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, color }),
+    });
+    const newContext = await res.json();
+    setContexts([...contexts, newContext]);
+    setActiveContextId(newContext.id);
   }
 
-  function sendMessage() {
-    if (!draft.trim()) return;
-    const userMsg: Message = {
-      id: crypto.randomUUID(),
-      contextId: activeContextId,
-      role: "user",
-      content: draft,
-    };
-    const fakeReply: Message = {
-      id: crypto.randomUUID(),
-      contextId: activeContextId,
-      role: "assistant",
-      content: "(fake reply) You said: " + draft,
-    };
-    setMessages([...messages, userMsg, fakeReply]);
+  async function sendMessage() {
+    if (!draft.trim() || !activeContextId) return;
+    const content = draft;
     setDraft("");
+    const res = await fetch(`${API}/contexts/${activeContextId}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+    });
+    const assistantMsg = await res.json();
+    // Refresh messages for this context from the server
+    const updated = await fetch(`${API}/contexts/${activeContextId}/messages`).then((r) => r.json());
+    setMessages([
+      ...messages.filter((m) => m.context_id !== activeContextId),
+      ...updated,
+    ]);
   }
 
   function colorFor(contextId: string) {
@@ -64,7 +90,6 @@ export default function Home() {
     <div style={{ maxWidth: 700, margin: "0 auto", padding: 24, fontFamily: "sans-serif" }}>
       <h1>ContextFlow</h1>
 
-      {/* Context navbar */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
         {contexts.map((ctx) => (
           <button
@@ -87,26 +112,25 @@ export default function Home() {
         </button>
       </div>
 
-      {/* Unified timeline — shows ALL messages from ALL contexts */}
       <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 16, minHeight: 300, marginBottom: 16 }}>
-        {messages.length === 0 && <p style={{ color: "#999" }}>No messages yet. Pick a context and say something.</p>}
+        {messages.length === 0 && <p style={{ color: "#999" }}>No messages yet.</p>}
         {messages.map((m) => (
           <div key={m.id} style={{ marginBottom: 10 }}>
-            <span style={{ fontWeight: "bold", color: colorFor(m.contextId) }}>
-              {nameFor(m.contextId)} · {m.role === "user" ? "You" : "AI"}:
+            <span style={{ fontWeight: "bold", color: colorFor(m.context_id) }}>
+              {nameFor(m.context_id)} · {m.role === "user" ? "You" : "AI"}:
             </span>{" "}
             {m.content}
           </div>
         ))}
       </div>
 
-      {/* Input, sends to whichever context is active */}
       <div style={{ display: "flex", gap: 8 }}>
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-          placeholder={`Message ${nameFor(activeContextId)}...`}
+          placeholder={activeContextId ? `Message ${nameFor(activeContextId)}...` : "Create a context first"}
+          disabled={!activeContextId}
           style={{ flex: 1, padding: 8, border: "1px solid #ccc", borderRadius: 6 }}
         />
         <button onClick={sendMessage} style={{ padding: "8px 16px", borderRadius: 6, background: "black", color: "white" }}>
