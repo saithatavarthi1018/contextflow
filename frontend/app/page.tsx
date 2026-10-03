@@ -23,6 +23,8 @@ export default function Home() {
   const [activeContextId, setActiveContextId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
+  const [selectedForCombine, setSelectedForCombine] = useState<string[]>([]);
+  const [combineMode, setCombineMode] = useState(false);
 
   // Load contexts once on page load
   useEffect(() => {
@@ -64,18 +66,47 @@ export default function Home() {
     if (!draft.trim() || !activeContextId) return;
     const content = draft;
     setDraft("");
-    const res = await fetch(`${API}/contexts/${activeContextId}/messages`, {
+    await fetch(`${API}/contexts/${activeContextId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content }),
     });
-    const assistantMsg = await res.json();
     // Refresh messages for this context from the server
     const updated = await fetch(`${API}/contexts/${activeContextId}/messages`).then((r) => r.json());
     setMessages([
       ...messages.filter((m) => m.context_id !== activeContextId),
       ...updated,
     ]);
+  }
+
+  async function combineSelected() {
+    if (selectedForCombine.length < 2) {
+      alert("Select at least 2 contexts to combine.");
+      return;
+    }
+    const name = prompt("Name this combined context:", "Combined");
+    if (!name) return;
+
+    const res = await fetch(`${API}/contexts/combine`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ context_ids: selectedForCombine, name }),
+    });
+    const newContext = await res.json();
+    setContexts([...contexts, newContext]);
+    setActiveContextId(newContext.id);
+    setCombineMode(false);
+    setSelectedForCombine([]);
+
+    // Reload messages to include the new combined context's intro
+    const updated = await fetch(`${API}/contexts/${newContext.id}/messages`).then((r) => r.json());
+    setMessages([...messages, ...updated]);
+  }
+
+  function toggleSelectForCombine(id: string) {
+    setSelectedForCombine((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
   }
 
   function colorFor(contextId: string) {
@@ -94,11 +125,19 @@ export default function Home() {
         {contexts.map((ctx) => (
           <button
             key={ctx.id}
-            onClick={() => setActiveContextId(ctx.id)}
+            onClick={() =>
+              combineMode ? toggleSelectForCombine(ctx.id) : setActiveContextId(ctx.id)
+            }
             style={{
               padding: "6px 12px",
               borderRadius: 20,
-              border: ctx.id === activeContextId ? "2px solid black" : "1px solid #ccc",
+              border: combineMode
+                ? selectedForCombine.includes(ctx.id)
+                  ? "2px solid purple"
+                  : "1px solid #ccc"
+                : ctx.id === activeContextId
+                ? "2px solid black"
+                : "1px solid #ccc",
               background: ctx.color + "22",
               cursor: "pointer",
             }}
@@ -110,6 +149,20 @@ export default function Home() {
         <button onClick={addContext} style={{ padding: "6px 12px", borderRadius: 20, border: "1px dashed #999" }}>
           + New Context
         </button>
+        <button
+          onClick={() => setCombineMode(!combineMode)}
+          style={{ padding: "6px 12px", borderRadius: 20, border: "1px dashed purple", color: "purple" }}
+        >
+          {combineMode ? "Cancel" : "⇄ Combine"}
+        </button>
+        {combineMode && (
+          <button
+            onClick={combineSelected}
+            style={{ padding: "6px 12px", borderRadius: 20, background: "purple", color: "white" }}
+          >
+            Combine Selected ({selectedForCombine.length})
+          </button>
+        )}
       </div>
 
       <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 16, minHeight: 300, marginBottom: 16 }}>
