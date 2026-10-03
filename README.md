@@ -1,3 +1,7 @@
+<<<<<<< HEAD
+=======
+[README.md](https://github.com/user-attachments/files/33005564/README.md)
+>>>>>>> a04cf288d80cf669f57a24f09083d89ad06bea5e
 # ContextFlow
 
 **A context-isolated LLM workspace.** Most chat apps send a model's entire conversation history on every request. ContextFlow keeps multiple independent conversation threads ("contexts"), each with its own isolated history, and lets the application — not the model — decide exactly which context a request can see.
